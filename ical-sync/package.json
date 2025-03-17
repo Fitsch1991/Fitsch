@@ -1,0 +1,10 @@
+{
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "dotenv": "^16.4.7",
+    "ical": "^0.8.0",
+    "jsdom": "^26.0.0",
+    "node-fetch": "^3.3.2"
+  }
+}

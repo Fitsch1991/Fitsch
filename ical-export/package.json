@@ -1,0 +1,15 @@
+{
+  "name": "ical-export",
+  "version": "1.0.0",
+  "description": "iCal-Export für Booking.com",
+  "main": "server.js",
+  "type": "module", 
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ical-generator": "^8.1.1",
+    "@supabase/supabase-js": "^2.0.0"
+  }
+}

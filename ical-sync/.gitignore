@@ -1,0 +1,19 @@
+# Node-Modules (werden bei Render automatisch installiert)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Umgebungskonfiguration (nicht hochladen!)
+.env
+
+# Temporäre/Build-Dateien
+dist/
+out/
+.cache/
+
+# Falls du Render benutzt:
+.railway/
+.render/
+
+# Falls du VS Code nutzt:
+.vscode/
