@@ -1,7 +1,31 @@
 import 'dotenv/config';
+import express from 'express';
 import fetch from 'node-fetch';
 import ical from 'ical';
-import { supabase } from './supabaseClient.js'; // Importiere Supabase aus supabaseClient.js
+import { supabase } from './supabaseClient.js';
+
+// Express-Server initialisieren
+const app = express();
+const port = process.env.PORT || 3000;
+
+// /ping-Endpunkt zum Keep-Alive
+app.get('/ping', (req, res) => {
+    res.send('pong');
+});
+
+app.listen(port, () => {
+    console.log(`Server läuft auf Port ${port}`);
+});
+
+// Keep-Alive-Funktion, die den /ping-Endpunkt alle 14 Minuten aufruft
+function keepAlive() {
+    const url = `http://localhost:${port}/ping`;
+    fetch(url)
+        .then(res => res.text())
+        .then(text => console.log(`KeepAlive ping response: ${text}`))
+        .catch(err => console.error(`KeepAlive error: ${err.message}`));
+}
+setInterval(keepAlive, 14 * 60 * 1000); // 14 Minuten in Millisekunden
 
 // Lade alle iCal-URLs aus der .env-Datei dynamisch
 const icalUrls = Object.keys(process.env)
@@ -26,7 +50,6 @@ async function getOrCreateGastId(gastName) {
         return data.id;
     }
     
-    // Falls Gast nicht existiert, neuen Gast erstellen
     console.log(`➕ Neuer Gast wird erstellt: ${gastName}`);
     const { data: newGast, error: insertError } = await supabase
         .from('gaeste')
@@ -78,10 +101,10 @@ async function fetchBookings() {
                             check_out: event.end.toISOString(),
                             gast_id: gastId,
                             anzahl_personen: 2, // Standardwert
-                            preis_pro_person: 0, // Falls benötigt, später anpassbar
-                            anzahlung: 0, // Standardwert
+                            preis_pro_person: 0,
+                            anzahlung: 0,
                             status: 'booking',
-                            verpflegung: 'Frühstück', // Standardwert
+                            verpflegung: 'Frühstück',
                             hund: false,
                             zusatz_preis: 0,
                             created_at: new Date().toISOString(),
@@ -97,7 +120,9 @@ async function fetchBookings() {
 
     if (allBookings.length > 0) {
         console.log("💾 Speichere Buchungen in Supabase...");
-        const { data, error } = await supabase.from('buchungen').upsert(allBookings, { onConflict: ['zimmer_id', 'check_in'] });
+        const { data, error } = await supabase
+            .from('buchungen')
+            .upsert(allBookings, { onConflict: ['zimmer_id', 'check_in'] });
         if (error) {
             console.error("❌ Fehler beim Speichern in Supabase:", error.message);
         } else {
@@ -108,8 +133,6 @@ async function fetchBookings() {
     }
 }
 
-// Starte die Synchronisation
+// Starte die erste Synchronisation und setze den Wiederholungsintervall auf 60 Minuten
 fetchBookings();
-
-// Falls du es jede Stunde automatisch starten willst:
-setInterval(fetchBookings, 60 * 60 * 1000); // Alle 60 Minuten
+setInterval(fetchBookings, 60 * 60 * 1000);

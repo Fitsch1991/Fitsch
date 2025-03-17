@@ -1,18 +1,22 @@
 import express from 'express';
 import ical from 'ical-generator';
-import { supabase } from './supabaseClient.js'; // ✅ Richtiger relativer Pfad
+import { supabase } from './supabaseClient.js';
+import http from 'http'; // Importiert das eingebaute http-Modul
 
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Neuer /ping Endpunkt, der einfach "pong" zurückgibt
+app.get('/ping', (req, res) => {
+    res.send('pong');
+});
+
+// iCal-Route
 app.get('/api/ical/room/:roomId.ics', async (req, res) => {
     const { roomId } = req.params;
-
-    // iCal-Kalender für das Zimmer erstellen
     const cal = ical({ name: `Zimmer ${roomId} Belegung` });
 
     try {
-        // Buchungen aus Supabase für das Zimmer abrufen
         const { data: bookings, error } = await supabase
             .from('buchungen')
             .select('*')
@@ -22,12 +26,10 @@ app.get('/api/ical/room/:roomId.ics', async (req, res) => {
             throw error;
         }
 
-        // Falls keine Buchungen vorhanden sind
         if (!bookings || bookings.length === 0) {
             console.log(`ℹ️ Keine Buchungen für Zimmer ${roomId}`);
         }
 
-        // Buchungen in iCal-Format umwandeln
         bookings.forEach(booking => {
             cal.createEvent({
                 start: new Date(booking.check_in),
@@ -38,7 +40,6 @@ app.get('/api/ical/room/:roomId.ics', async (req, res) => {
             });
         });
 
-        // iCal-Datei als Antwort senden
         res.setHeader('Content-Type', 'text/calendar');
         res.send(cal.toString());
     } catch (error) {
@@ -47,6 +48,20 @@ app.get('/api/ical/room/:roomId.ics', async (req, res) => {
     }
 });
 
+// Startet den Server
 app.listen(port, () => {
     console.log(`📅 iCal-Export läuft auf Port ${port}`);
 });
+
+// Funktion, die den /ping Endpunkt anpingt
+function keepAlive() {
+    const url = `http://localhost:${port}/ping`;
+    http.get(url, (res) => {
+        console.log(`KeepAlive ping response: ${res.statusCode}`);
+    }).on('error', (err) => {
+        console.error(`KeepAlive error: ${err.message}`);
+    });
+}
+
+// Ruft die keepAlive-Funktion alle 14 Minuten auf (14 * 60 * 1000 Millisekunden)
+setInterval(keepAlive, 14 * 60 * 1000);
