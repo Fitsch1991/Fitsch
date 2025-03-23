@@ -4,7 +4,7 @@ import { supabase } from './supabaseClient.js';
 import http from 'http'; // Importiert das eingebaute http-Modul
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT;
 
 // Neuer /ping Endpunkt, der einfach "pong" zurückgibt
 app.get('/ping', (req, res) => {
