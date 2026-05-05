@@ -4,138 +4,177 @@ import fetch from 'node-fetch';
 import ical from 'ical';
 import { supabase } from './supabaseClient.js';
 
-// Express-Server initialisieren
 const app = express();
 const port = process.env.PORT || 3000;
 
-// /ping-Endpunkt zum Keep-Alive
+/* -------------------------
+   BASIC ROUTES
+--------------------------*/
+
 app.get('/ping', (req, res) => {
     res.send('pong');
 });
 
-// Root-Endpunkt für Render (Port-Erkennung)
 app.get('/', (req, res) => {
     res.send('✅ iCal Sync läuft!');
 });
 
-// Server starten
+/* -------------------------
+   START SERVER
+--------------------------*/
+
 app.listen(port, () => {
     console.log(`🚀 Server läuft auf Port ${port}`);
+
+    // Start verzögert (wichtig für Stabilität)
+    setTimeout(() => {
+        console.log("🔄 Initialer iCal Sync startet...");
+        fetchBookings();
+
+        setInterval(() => {
+            fetchBookings();
+        }, 60 * 60 * 1000);
+
+    }, 5000);
 });
 
-// Keep-Alive-Funktion, die den /ping-Endpunkt alle 14 Minuten aufruft
+/* -------------------------
+   KEEP ALIVE (optional)
+--------------------------*/
+
 function keepAlive() {
     const url = `http://localhost:${port}/ping`;
+
     fetch(url)
         .then(res => res.text())
-        .then(text => console.log(`KeepAlive ping response: ${text}`))
+        .then(text => console.log(`KeepAlive: ${text}`))
         .catch(err => console.error(`KeepAlive error: ${err.message}`));
 }
-setInterval(keepAlive, 14 * 60 * 1000); // 14 Minuten in Millisekunden
 
-// Lade alle iCal-URLs aus der .env-Datei dynamisch
+setInterval(keepAlive, 14 * 60 * 1000);
+
+/* -------------------------
+   LOAD ICAL URLS
+--------------------------*/
+
 const icalUrls = Object.keys(process.env)
     .filter(key => key.startsWith("ICAL_URL_"))
     .map(key => process.env[key])
-    .filter(Boolean);
+    .filter(url => url && url.startsWith("http"));
 
-// Funktion zum Abrufen oder Erstellen der Gast-ID basierend auf dem Namen
+/* -------------------------
+   GUEST HANDLING
+--------------------------*/
+
 async function getOrCreateGastId(gastName) {
-    let { data, error } = await supabase
-        .from('gaeste')
-        .select('id')
-        .ilike('nachname', `%${gastName}%`)
-        .maybeSingle();
+    try {
+        let { data } = await supabase
+            .from('gaeste')
+            .select('id')
+            .ilike('nachname', `%${gastName}%`)
+            .maybeSingle();
 
-    if (error) {
-        console.error(`⚠️ Fehler beim Abrufen der Gast-ID für ${gastName}:`, error.message);
+        if (data) return data.id;
+
+        const { data: newGast } = await supabase
+            .from('gaeste')
+            .insert([{ nachname: gastName }])
+            .select('id')
+            .single();
+
+        return newGast?.id || null;
+
+    } catch (err) {
+        console.error("Gast Fehler:", err.message);
         return null;
     }
-
-    if (data) {
-        return data.id;
-    }
-
-    console.log(`➕ Neuer Gast wird erstellt: ${gastName}`);
-    const { data: newGast, error: insertError } = await supabase
-        .from('gaeste')
-        .insert([{ nachname: gastName }])
-        .select('id')
-        .single();
-
-    if (insertError) {
-        console.error(`❌ Fehler beim Erstellen des neuen Gasts ${gastName}:`, insertError.message);
-        return null;
-    }
-
-    return newGast.id;
 }
 
-// Funktion zum Abrufen und Speichern der iCal-Daten
+/* -------------------------
+   ICAL SYNC (CRASH SAFE)
+--------------------------*/
+
 async function fetchBookings() {
-    console.log("🔄 Starte iCal-Synchronisation...");
-    let allBookings = [];
-    let existingBookings = new Set();
+    try {
+        console.log("🔄 iCal Sync gestartet");
 
-    await Promise.all(icalUrls.map(async (url, index) => {
-        console.log(`📡 Abrufen von: ${url}`);
-        try {
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`HTTP-Fehler! Status: ${response.status}`);
-            }
-            const icalData = await response.text();
-            const parsedData = ical.parseICS(icalData);
+        if (!icalUrls.length) {
+            console.log("⚠️ Keine ICAL URLs gesetzt");
+            return;
+        }
 
-            for (const event of Object.values(parsedData)) {
-                if (event.start && event.end && event.summary) {
-                    console.log("📅 Gefundene Buchung:", event);
+        let allBookings = [];
+
+        for (let index = 0; index < icalUrls.length; index++) {
+            const url = icalUrls[index];
+
+            try {
+                console.log(`📡 Quelle ${index + 1}: ${url}`);
+
+                const response = await fetch(url);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const text = await response.text();
+
+                if (!text.includes("BEGIN:VCALENDAR")) {
+                    throw new Error("Kein gültiger iCal Inhalt");
+                }
+
+                const parsed = ical.parseICS(text);
+
+                for (const event of Object.values(parsed)) {
+                    if (!event.start || !event.end || !event.summary) continue;
 
                     const gastId = await getOrCreateGastId(event.summary);
 
-                    const bookingKey = `${index + 1}_${event.start.toISOString()}_${event.end.toISOString()}`;
-
-                    if (!existingBookings.has(bookingKey)) {
-                        existingBookings.add(bookingKey);
-
-                        allBookings.push({
-                            zimmer_id: index + 1,
-                            check_in: event.start.toISOString(),
-                            check_out: event.end.toISOString(),
-                            gast_id: gastId,
-                            anzahl_personen: 2,
-                            preis_pro_person: 0,
-                            anzahlung: 0,
-                            status: 'booking',
-                            verpflegung: 'Frühstück',
-                            hund: false,
-                            zusatz_preis: 0,
-                            created_at: new Date().toISOString(),
-                            updated_at: new Date().toISOString()
-                        });
-                    }
+                    allBookings.push({
+                        zimmer_id: index + 1,
+                        check_in: event.start.toISOString(),
+                        check_out: event.end.toISOString(),
+                        gast_id: gastId,
+                        anzahl_personen: 2,
+                        preis_pro_person: 0,
+                        anzahlung: 0,
+                        status: 'booking',
+                        verpflegung: 'Frühstück',
+                        hund: false,
+                        zusatz_preis: 0,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                    });
                 }
-            }
-        } catch (error) {
-            console.error(`⚠️ Fehler beim Abrufen von ${url}:`, error.message);
-        }
-    }));
 
-    if (allBookings.length > 0) {
-        console.log("💾 Speichere Buchungen in Supabase...");
-        const { data, error } = await supabase
-            .from('buchungen')
-            .upsert(allBookings, { onConflict: ['zimmer_id', 'check_in'] });
-        if (error) {
-            console.error("❌ Fehler beim Speichern in Supabase:", error.message);
-        } else {
-            console.log("✅ Buchungen erfolgreich in Supabase gespeichert.");
+                console.log(`✅ Quelle ${index + 1} OK`);
+
+            } catch (err) {
+                console.error(`❌ Quelle ${index + 1} FEHLER: ${url}`);
+                console.error(err.message);
+                continue; // WICHTIG: verhindert Crash
+            }
         }
-    } else {
-        console.log("ℹ️ Keine neuen Buchungen gefunden.");
+
+        if (allBookings.length > 0) {
+            console.log(`💾 Speichere ${allBookings.length} Buchungen...`);
+
+            const { error } = await supabase
+                .from('buchungen')
+                .upsert(allBookings, {
+                    onConflict: ['zimmer_id', 'check_in']
+                });
+
+            if (error) {
+                console.error("Supabase Fehler:", error.message);
+            } else {
+                console.log("✅ Speicherung erfolgreich");
+            }
+        } else {
+            console.log("ℹ️ Keine Buchungen gefunden");
+        }
+
+    } catch (err) {
+        console.error("💥 GLOBALER SYNC FEHLER (Server läuft weiter):", err.message);
     }
 }
-
-// Erste Synchronisation ausführen und alle 60 Minuten wiederholen
-fetchBookings();
-setInterval(fetchBookings, 60 * 60 * 1000);
