@@ -1,10 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = "https://elywhketsxozigeycjkj.supabase.co";
-const supabaseKey = "DEIN_KEY";
+const supabaseKey = process.env.SUPABASE_KEY!;
 
 export const supabase = createClient(supabaseUrl, supabaseKey, {
   realtime: {
-    enabled: false,
+    disabled: true,
   },
 });
